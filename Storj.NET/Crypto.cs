@@ -131,32 +131,7 @@ namespace StorjDotNet
 
         public string DecryptMeta(string encryptedMeta, byte[] key)
         {
-            byte[] encryptedBucketName = Convert.FromBase64String(encryptedMeta);
-            byte[] digest = encryptedBucketName.Take(GCM_DIGEST_SIZE).ToArray();
-            byte[] iv = encryptedBucketName.Skip(GCM_DIGEST_SIZE).Take(SHA256_DIGEST_SIZE).ToArray().ToHexString().HexStringToBytes();
-            byte[] cipherText = encryptedBucketName.Skip(GCM_DIGEST_SIZE + SHA256_DIGEST_SIZE).ToArray();
-            byte[] clearText;
-
-            var aes = new AesManaged();
-            var blocksize = aes.BlockSize;
-            var blocksizes = aes.LegalBlockSizes;
-            using (var decryptor = aes.CreateDecryptor(key, iv))
-            {
-                using (var memStream = new MemoryStream())
-                {
-                    using (var cryptoStream = new CryptoStream(memStream, decryptor, CryptoStreamMode.Write))
-                    {
-                        using (var streamWriter = new StreamWriter(cryptoStream))
-                        {
-                            streamWriter.Write(cipherText);
-                        }
-                        cryptoStream.FlushFinalBlock();
-                    }
-                    clearText = memStream.ToArray();
-                }
-            }
-
-            return new string(Encoding.UTF8.GetChars(clearText));
+            return Encryption.AESGCM.SimpleDecrypt(encryptedMeta, key, GCM_DIGEST_SIZE);
         }
 
         public static void EncryptFile(string sourceFilename, string destinationFilename, string password)
