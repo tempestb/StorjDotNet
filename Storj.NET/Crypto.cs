@@ -81,11 +81,8 @@ namespace StorjDotNet
         {
             HMac hmac = new HMac(new Sha512Digest());
             hmac.Init(new KeyParameter(key));
-            foreach (byte b in update)
-            {
-                hmac.Update(b);
-            }
-            byte[] digest = new byte[Sha512DigestSize];
+            hmac.BlockUpdate(update, 0, update.Length);
+            byte[] digest = new byte[hmac.GetMacSize()];
             hmac.DoFinal(digest, 0);
             return digest;
         }

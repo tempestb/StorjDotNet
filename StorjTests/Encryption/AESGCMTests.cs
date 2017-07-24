@@ -22,6 +22,16 @@ namespace StorjTests.Encryption
             "mjWjwoR2YRcSeHf+OqV/uUbb94eiB13BLHu86stzgVJG2/eHogddwSx7vOrLc4FSjQTgqktamjWjwoR2YRcSeHf+OqV/uQ==";
 
         [TestMethod]
+        public void GeneratesKey()
+        {
+            var key = AESGCM.NewKey();
+            Assert.IsNotNull(key);
+            Assert.IsInstanceOfType(key, typeof(byte[]));
+            Assert.AreEqual(AESGCM.KeyBitSize / 8, key.Length);
+            Assert.IsFalse(key.All(b => b == 0));
+        }
+
+        [TestMethod]
         public void EncryptMessage()
         {
             string encrypted = AESGCM.SimpleEncrypt(_secretMessage, _key, _iv); 
@@ -29,6 +39,7 @@ namespace StorjTests.Encryption
             Assert.IsFalse(string.IsNullOrEmpty(encrypted), "Encrypted message should not be null or empty.");
             Assert.AreNotEqual(_secretMessage, encrypted, "Encrypted message should not equal cleartext secret");
         }
+
         [TestMethod]
         public void DecryptsMessage()
         {
@@ -36,5 +47,65 @@ namespace StorjTests.Encryption
             Console.WriteLine("Decrypted message is {0}", clearText);
             Assert.AreEqual(_secretMessage, clearText);
         }
+
+        #region [ Error Checking ]
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void EncryptErrorsWhenKeyIsWrongLength()
+        {
+            AESGCM.SimpleEncrypt("hello", _key.Take(5).ToArray(), _iv);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void EncryptErrorsWhenMessageIsNull()
+        {
+            AESGCM.SimpleEncrypt("", _key, _iv);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void EncryptBytesErrorsWhenMessageIsNull()
+        {
+            AESGCM.SimpleEncrypt(new byte[0], _key, _iv);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void DecryptErrorsWhenMessageIsNull()
+        {
+            AESGCM.SimpleDecrypt("", _key);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void DecryptErrorsWhenKeyIsNull()
+        {
+            AESGCM.SimpleDecrypt(_encryptedMessage, _key.Take(5).ToArray());
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void DecryptErrorsWhenKeyWrongLength()
+        {
+            AESGCM.SimpleDecrypt("", _key.Take(5).ToArray());
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void DecryptBytesErrorsWhenMessageIsNull()
+        {
+            AESGCM.SimpleDecrypt(new byte[0], _key);
+        }
+
+        [TestMethod]
+        public void DecryptReturnsNullWhenBadKey()
+        {
+            string clearText = AESGCM.SimpleDecrypt(_encryptedMessage, AESGCM.NewKey());
+            Assert.IsNull(clearText);
+        }
+
+        #endregion
     }
 }

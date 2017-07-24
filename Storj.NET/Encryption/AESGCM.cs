@@ -181,10 +181,10 @@ namespace StorjDotNet.Encryption
         {
             //User Error Checks
             if (key == null || key.Length != KeyBitSize / 8)
-                throw new ArgumentException(String.Format("Key needs to be {0} bit!", KeyBitSize), "key");
+                throw new ArgumentException(string.Format("Key needs to be {0} bit!", KeyBitSize), nameof(key));
 
             if (encryptedMessage == null || encryptedMessage.Length == 0)
-                throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
+                throw new ArgumentException("Encrypted Message Required!", nameof(encryptedMessage));
 
             using (var cipherStream = new MemoryStream(encryptedMessage))
             using (var cipherReader = new BinaryReader(cipherStream))
@@ -201,13 +201,6 @@ namespace StorjDotNet.Encryption
 
                 //Decrypt Cipher Text
                 var cipherText = cipherReader.ReadBytes(encryptedMessage.Length - GcmDigestLength - iv.Length);
-                if (cipherText.Length < 16)
-                {
-                    byte[] tempCipher = new byte[16];
-                    cipherText.CopyTo(tempCipher, 0);
-                    cipherText = new byte[16];
-                    tempCipher.CopyTo(cipherText, 0);
-                }
                 var cipherTextWithMac = new byte[cipherText.Length + mac.Length];
                 cipherText.CopyTo(cipherTextWithMac, 0);
                 mac.CopyTo(cipherTextWithMac, cipherText.Length);
