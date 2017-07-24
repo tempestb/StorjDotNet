@@ -12,60 +12,51 @@ using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Parameters;
 using System.IO;
 using Security.Cryptography;
+using StorjDotNet.Encryption;
 
 namespace StorjDotNet
 {
     public class Crypto
     {
-        private const string BUCKET_NAME_MAGIC = "398734aab3c4c30c9f22590e83a95f7e43556a45fc2b3060e0c39fde31f50272";
-        private readonly byte[] BUCKET_META_MAGIC = new byte[32] { 66, 150, 71, 16, 50, 114, 88, 160, 163, 35, 154, 65, 162, 213, 226, 215, 70, 138, 57, 61, 52, 19, 210, 170, 38, 164, 162, 200, 86, 201, 2, 81 };
-        private const int SHA256_DIGEST_SIZE = 32;
-        private const int SHA512_DIGEST_SIZE = 64;
-        private const int GCM_DIGEST_SIZE = 16;
-        private const int AES_BLOCK_SIZE = 16;
+        private const string BucketNameMagic = "398734aab3c4c30c9f22590e83a95f7e43556a45fc2b3060e0c39fde31f50272";
+        private readonly byte[] _bucketMetaMagic = new byte[32] { 66, 150, 71, 16, 50, 114, 88, 160, 163, 35, 154, 65, 162, 213, 226, 215, 70, 138, 57, 61, 52, 19, 210, 170, 38, 164, 162, 200, 86, 201, 2, 81 };
+        private const int Sha256DigestSize = 32;
+        private const int Sha512DigestSize = 64;
 
-        private const int DETERMINISTIC_KEY_LENGTH = 64;
+        private const int DeterministicKeyLength = 64;
 
-        private readonly EcKeyPair m_KeyPair;
-        private readonly byte[] m_Seed;
+        private readonly EcKeyPair _keyPair;
+        private readonly byte[] _seed;
 
         public Crypto(string mnemonic)
         {
-            m_Seed = BIP39.GetSeedBytes(mnemonic);
-            m_KeyPair = new EcKeyPair(m_Seed);
+            _seed = BIP39.GetSeedBytes(mnemonic);
+            _keyPair = new EcKeyPair(_seed);
         }
 
         public Crypto(BIP39 bip39)
         {
-            m_Seed = bip39.SeedBytes;
-            m_KeyPair = new EcKeyPair(m_Seed);
+            _seed = bip39.SeedBytes;
+            _keyPair = new EcKeyPair(_seed);
         }
 
-        public string Pubkey
-        {
-            get
-            {
-                return m_KeyPair.PublicKey.ToHexString();
-            }
-        }
+        public string Pubkey => _keyPair.PublicKey.ToHexString();
+            
         public string SignMessage(string message)
         {
-            return m_KeyPair.Sign(message.ToByteArray()).ToHexString();
+            return _keyPair.Sign(message.ToByteArray()).ToHexString();
         }
 
         public void EncryptBucketName(Bucket bucket)
         {
-            string bucketKey = GenerateBucketKey(BUCKET_NAME_MAGIC);
+            string bucketKey = GenerateBucketKey(BucketNameMagic);
             
-            byte[] key = GetHMAC_SHA512(bucketKey.ToByteArray().Take(SHA256_DIGEST_SIZE).ToArray(),
-                BUCKET_META_MAGIC.Take(SHA256_DIGEST_SIZE).ToArray());
+            byte[] hmac = GetHMAC_SHA512(bucketKey.ToByteArray(), _bucketMetaMagic);
+            byte[] key = hmac.Take(Sha256DigestSize).ToArray();
 
-            byte[] bucketNameIv = GetHMAC_SHA512(bucketKey.HexStringToBytes().Take(SHA256_DIGEST_SIZE).ToArray(),
-                bucket.Name.ToByteArray());
+            byte[] bucketNameIv = GetHMAC_SHA512(bucketKey.ToByteArray(), bucket.Name.ToByteArray()).Take(Sha256DigestSize).ToArray();
 
-            bucket.Name = EncryptMeta(bucket.Name, key, bucketNameIv);
-            
-
+            bucket.Name = AESGCM.SimpleEncrypt(bucket.Name, key, bucketNameIv);
         }
 
         public void TryDecryptBuckets(IEnumerable<Bucket> buckets)
@@ -78,9 +69,9 @@ namespace StorjDotNet
 
         public void TryDecryptBucket(Bucket bucket)
         {
-            string bucketKey = GenerateBucketKey(BUCKET_NAME_MAGIC);
-            byte[] hmac = GetHMAC_SHA512(bucketKey.ToByteArray(), BUCKET_META_MAGIC);
-            byte[] key = hmac.Take(SHA256_DIGEST_SIZE).ToArray();
+            string bucketKey = GenerateBucketKey(BucketNameMagic);
+            byte[] hmac = GetHMAC_SHA512(bucketKey.ToByteArray(), _bucketMetaMagic);
+            byte[] key = hmac.Take(Sha256DigestSize).ToArray();
             string decryptedBucketName = DecryptMeta(bucket.Name, key);
             bucket.Name = decryptedBucketName;
             
@@ -94,44 +85,19 @@ namespace StorjDotNet
             {
                 hmac.Update(b);
             }
-            byte[] digest = new byte[SHA512_DIGEST_SIZE];
+            byte[] digest = new byte[Sha512DigestSize];
             hmac.DoFinal(digest, 0);
             return digest;
         }
 
         public string EncryptMeta(string meta, byte[] key, byte[] iv)
         {
-            using (var aes = new AuthenticatedAesCng())
-            {
-                aes.CngMode = CngChainingMode.Gcm;
-                aes.Key = key;
-                aes.IV = iv;
-                aes.Padding = PaddingMode.None;
-                
-                byte[] ciphertext;
-                byte[] digest;
-                using (MemoryStream ms = new MemoryStream())
-                using (IAuthenticatedCryptoTransform encryptor = aes.CreateAuthenticatedEncryptor())
-                using (CryptoStream cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-                {
-                    // Encrypt the secret message
-                    byte[] plaintext = meta.ToByteArray();
-                    cs.Write(plaintext, 0, plaintext.Length);
-
-                    // Finish the encryption and get the output authentication tag and ciphertext
-                    cs.FlushFinalBlock();
-                    digest = encryptor.GetTag();
-                    ciphertext = ms.ToArray();
-                }
-
-                // TODO: GCM digest + IV + encrypted name
-                return Convert.ToBase64String(ciphertext);
-            }
+            return AESGCM.SimpleEncrypt(meta, key, iv);
         }
 
         public string DecryptMeta(string encryptedMeta, byte[] key)
         {
-            return Encryption.AESGCM.SimpleDecrypt(encryptedMeta, key, GCM_DIGEST_SIZE);
+            return AESGCM.SimpleDecrypt(encryptedMeta, key);
         }
 
         public static void EncryptFile(string sourceFilename, string destinationFilename, string password)
@@ -206,7 +172,7 @@ namespace StorjDotNet
 
         public string GenerateBucketKey(string bucketId)
         {
-            return GetDeterministicKey(m_Seed, 128, bucketId);
+            return GetDeterministicKey(_seed, 128, bucketId);
         }
 
         private string GetDeterministicKey(byte[] seed, int keyLength, string id)

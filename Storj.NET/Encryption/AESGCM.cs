@@ -6,8 +6,10 @@
  */
 
 using System;
+using System.Diagnostics.Contracts;
 using System.IO;
 using System.Text;
+using System.Linq;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Generators;
@@ -22,15 +24,21 @@ namespace StorjDotNet.Encryption
     {
         private static readonly SecureRandom Random = new SecureRandom();
 
+
+        public const int GcmDigestLength = 16;
+
+        // TODO: enforce this?
+        public const int IvLength = 32;
+
         //Preconfigured Encryption Parameters
-        public static readonly int NonceBitSize = 256;
-        public static readonly int MacBitSize = 128;
-        public static readonly int KeyBitSize = 256;
+        public const int NonceBitSize = 128;
+        public const int MacBitSize = 128;
+        public const int KeyBitSize = 256;
 
         //Preconfigured Password Key Derivation Parameters
-        public static readonly int SaltBitSize = 128;
-        public static readonly int Iterations = 10000;
-        public static readonly int MinPasswordLength = 12;
+        public const int SaltBitSize = 128;
+        public const int Iterations = 10000;
+        public const int MinPasswordLength = 12;
 
 
         /// <summary>
@@ -49,7 +57,7 @@ namespace StorjDotNet.Encryption
         /// </summary>
         /// <param name="secretMessage">The secret message.</param>
         /// <param name="key">The key.</param>
-        /// <param name="nonSecretPayload">Optional non-secret payload.</param>
+        /// <param name="iv">The IV used to encrypt.</param>
         /// <returns>
         /// Encrypted Message
         /// </returns>
@@ -57,13 +65,13 @@ namespace StorjDotNet.Encryption
         /// <remarks>
         /// Adds overhead of (Optional-Payload + BlockSize(16) + Message +  HMac-Tag(16)) * 1.33 Base64
         /// </remarks>
-        public static string SimpleEncrypt(string secretMessage, byte[] key, byte[] nonSecretPayload = null)
+        public static string SimpleEncrypt(string secretMessage, byte[] key, byte[] iv)
         {
             if (string.IsNullOrEmpty(secretMessage))
-                throw new ArgumentException("Secret Message Required!", "secretMessage");
+                throw new ArgumentException("Secret Message Required!", nameof(secretMessage));
 
             var plainText = Encoding.UTF8.GetBytes(secretMessage);
-            var cipherText = SimpleEncrypt(plainText, key, nonSecretPayload);
+            var cipherText = SimpleEncrypt(plainText, key, iv);
             return Convert.ToBase64String(cipherText);
         }
 
@@ -73,16 +81,15 @@ namespace StorjDotNet.Encryption
         /// </summary>
         /// <param name="encryptedMessage">The encrypted message.</param>
         /// <param name="key">The key.</param>
-        /// <param name="nonSecretPayloadLength">Length of the optional non-secret payload.</param>
         /// <returns>Decrypted Message</returns>
-        public static string SimpleDecrypt(string encryptedMessage, byte[] key, int nonSecretPayloadLength = 0)
+        public static string SimpleDecrypt(string encryptedMessage, byte[] key)
         {
             if (string.IsNullOrEmpty(encryptedMessage))
-                throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
+                throw new ArgumentException("Encrypted Message Required!", nameof(encryptedMessage));
 
             var cipherText = Convert.FromBase64String(encryptedMessage);
-            var plaintext = SimpleDecrypt(cipherText, key, nonSecretPayloadLength);
-            return plaintext == null ? null : Encoding.UTF8.GetString(plaintext);
+            var plaintext = SimpleDecrypt(cipherText, key);
+            return plaintext == null ? null : Encoding.UTF8.GetString(plaintext).Replace("\0","");
         }
 
         /// <summary>
@@ -99,16 +106,16 @@ namespace StorjDotNet.Encryption
         /// Significantly less secure than using random binary keys.
         /// Adds additional non secret payload for key generation parameters.
         /// </remarks>
-        public static string SimpleEncryptWithPassword(string secretMessage, string password,
-                                 byte[] nonSecretPayload = null)
-        {
-            if (string.IsNullOrEmpty(secretMessage))
-                throw new ArgumentException("Secret Message Required!", "secretMessage");
+        //public static string SimpleEncryptWithPassword(string secretMessage, string password,
+        //                         byte[] nonSecretPayload = null)
+        //{
+        //    if (string.IsNullOrEmpty(secretMessage))
+        //        throw new ArgumentException("Secret Message Required!", "secretMessage");
 
-            var plainText = Encoding.UTF8.GetBytes(secretMessage);
-            var cipherText = SimpleEncryptWithPassword(plainText, password, nonSecretPayload);
-            return Convert.ToBase64String(cipherText);
-        }
+        //    var plainText = Encoding.UTF8.GetBytes(secretMessage);
+        //    var cipherText = SimpleEncryptWithPassword(plainText, password, nonSecretPayload);
+        //    return Convert.ToBase64String(cipherText);
+        //}
 
 
         /// <summary>
@@ -125,35 +132,28 @@ namespace StorjDotNet.Encryption
         /// <remarks>
         /// Significantly less secure than using random binary keys.
         /// </remarks>
-        public static string SimpleDecryptWithPassword(string encryptedMessage, string password,
-                                 int nonSecretPayloadLength = 0)
-        {
-            if (string.IsNullOrWhiteSpace(encryptedMessage))
-                throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
+        //public static string SimpleDecryptWithPassword(string encryptedMessage, string password,
+        //                         int nonSecretPayloadLength = 0)
+        //{
+        //    if (string.IsNullOrWhiteSpace(encryptedMessage))
+        //        throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
 
-            var cipherText = Convert.FromBase64String(encryptedMessage);
-            var plaintext = SimpleDecryptWithPassword(cipherText, password, nonSecretPayloadLength);
-            return plaintext == null ? null : Encoding.UTF8.GetString(plaintext);
-        }
+        //    var cipherText = Convert.FromBase64String(encryptedMessage);
+        //    var plaintext = SimpleDecryptWithPassword(cipherText, password, nonSecretPayloadLength);
+        //    return plaintext == null ? null : Encoding.UTF8.GetString(plaintext);
+        //}
 
-        public static byte[] SimpleEncrypt(byte[] secretMessage, byte[] key, byte[] nonSecretPayload = null)
+        public static byte[] SimpleEncrypt(byte[] secretMessage, byte[] key, byte[] iv)
         {
             //User Error Checks
             if (key == null || key.Length != KeyBitSize / 8)
-                throw new ArgumentException(String.Format("Key needs to be {0} bit!", KeyBitSize), "key");
+                throw new ArgumentException(String.Format("Key needs to be {0} bit!", KeyBitSize), nameof(key));
 
             if (secretMessage == null || secretMessage.Length == 0)
-                throw new ArgumentException("Secret Message Required!", "secretMessage");
-
-            //Non-secret Payload Optional
-            nonSecretPayload = nonSecretPayload ?? new byte[] { };
-
-            //Using random nonce large enough not to repeat
-            var nonce = new byte[NonceBitSize / 8];
-            Random.NextBytes(nonce, 0, nonce.Length);
+                throw new ArgumentException("Secret Message Required!", nameof(secretMessage));
 
             var cipher = new GcmBlockCipher(new AesFastEngine());
-            var parameters = new AeadParameters(new KeyParameter(key), MacBitSize, nonce, nonSecretPayload);
+            var parameters = new ParametersWithIV(new KeyParameter(key), iv);
             cipher.Init(true, parameters);
 
             //Generate Cipher Text With Auth Tag
@@ -167,9 +167,9 @@ namespace StorjDotNet.Encryption
                 using (var binaryWriter = new BinaryWriter(combinedStream))
                 {
                     //Prepend Authenticated Payload
-                    binaryWriter.Write(nonSecretPayload);
+                    binaryWriter.Write(cipher.GetMac());
                     //Prepend Nonce
-                    binaryWriter.Write(nonce);
+                    binaryWriter.Write(iv);
                     //Write Cipher Text
                     binaryWriter.Write(cipherText);
                 }
@@ -177,7 +177,7 @@ namespace StorjDotNet.Encryption
             }
         }
 
-        public static byte[] SimpleDecrypt(byte[] encryptedMessage, byte[] key, int nonSecretPayloadLength = 0)
+        public static byte[] SimpleDecrypt(byte[] encryptedMessage, byte[] key)
         {
             //User Error Checks
             if (key == null || key.Length != KeyBitSize / 8)
@@ -189,94 +189,107 @@ namespace StorjDotNet.Encryption
             using (var cipherStream = new MemoryStream(encryptedMessage))
             using (var cipherReader = new BinaryReader(cipherStream))
             {
-                //Grab Payload
-                var nonSecretPayload = cipherReader.ReadBytes(nonSecretPayloadLength);
+                //Grab MAC/digest
+                var mac = cipherReader.ReadBytes(GcmDigestLength);
 
-                //Grab Nonce
-                var nonce = cipherReader.ReadBytes(NonceBitSize / 8);
+                //Grab IV
+                var iv = cipherReader.ReadBytes(IvLength);
 
                 var cipher = new GcmBlockCipher(new AesFastEngine());
-                var parameters = new AeadParameters(new KeyParameter(key), MacBitSize, nonce, nonSecretPayload);
+                var parameters = new ParametersWithIV(new KeyParameter(key), iv);
                 cipher.Init(false, parameters);
 
                 //Decrypt Cipher Text
-                var cipherText = cipherReader.ReadBytes(encryptedMessage.Length - nonSecretPayloadLength - nonce.Length);
-                var plainText = new byte[cipher.GetOutputSize(cipherText.Length)];
+                var cipherText = cipherReader.ReadBytes(encryptedMessage.Length - GcmDigestLength - iv.Length);
+                if (cipherText.Length < 16)
+                {
+                    byte[] tempCipher = new byte[16];
+                    cipherText.CopyTo(tempCipher, 0);
+                    cipherText = new byte[16];
+                    tempCipher.CopyTo(cipherText, 0);
+                }
+                var cipherTextWithMac = new byte[cipherText.Length + mac.Length];
+                cipherText.CopyTo(cipherTextWithMac, 0);
+                mac.CopyTo(cipherTextWithMac, cipherText.Length);
+                var plainText = new byte[cipher.GetOutputSize(cipherTextWithMac.Length)];
 
                 try
                 {
-                    var len = cipher.ProcessBytes(cipherText, 0, cipherText.Length, plainText, 0);
+                    var len = cipher.ProcessBytes(cipherTextWithMac, 0, plainText.Length, plainText, 0);
                     cipher.DoFinal(plainText, len);
 
                 }
-                catch (InvalidCipherTextException)
+                catch (InvalidCipherTextException ex)
                 {
+                    // TODO: remove this once working
+                    Console.WriteLine(ex.Message);
                     //Return null if it doesn't authenticate
                     return null;
                 }
-
                 return plainText;
             }
 
         }
 
-        public static byte[] SimpleEncryptWithPassword(byte[] secretMessage, string password, byte[] nonSecretPayload = null)
-        {
-            nonSecretPayload = nonSecretPayload ?? new byte[] { };
+        // TODO: update this to match other methods if needed
+        //public static byte[] SimpleEncryptWithPassword(byte[] secretMessage, string password, byte[] nonSecretPayload = null)
+        //{
+        //    nonSecretPayload = nonSecretPayload ?? new byte[] { };
 
-            //User Error Checks
-            if (string.IsNullOrWhiteSpace(password) || password.Length < MinPasswordLength)
-                throw new ArgumentException(String.Format("Must have a password of at least {0} characters!", MinPasswordLength), "password");
+        //    //User Error Checks
+        //    if (string.IsNullOrWhiteSpace(password) || password.Length < MinPasswordLength)
+        //        throw new ArgumentException(String.Format("Must have a password of at least {0} characters!", MinPasswordLength), "password");
 
-            if (secretMessage == null || secretMessage.Length == 0)
-                throw new ArgumentException("Secret Message Required!", "secretMessage");
+        //    if (secretMessage == null || secretMessage.Length == 0)
+        //        throw new ArgumentException("Secret Message Required!", "secretMessage");
 
-            var generator = new Pkcs5S2ParametersGenerator();
+        //    var generator = new Pkcs5S2ParametersGenerator();
 
-            //Use Random Salt to minimize pre-generated weak password attacks.
-            var salt = new byte[SaltBitSize / 8];
-            Random.NextBytes(salt);
+        //    //Use Random Salt to minimize pre-generated weak password attacks.
+        //    var salt = new byte[SaltBitSize / 8];
+        //    Random.NextBytes(salt);
 
-            generator.Init(
-              PbeParametersGenerator.Pkcs5PasswordToBytes(password.ToCharArray()),
-              salt,
-              Iterations);
+        //    generator.Init(
+        //      PbeParametersGenerator.Pkcs5PasswordToBytes(password.ToCharArray()),
+        //      salt,
+        //      Iterations);
 
-            //Generate Key
-            var key = (KeyParameter)generator.GenerateDerivedMacParameters(KeyBitSize);
+        //    //Generate Key
+        //    var key = (KeyParameter)generator.GenerateDerivedMacParameters(KeyBitSize);
 
-            //Create Full Non Secret Payload
-            var payload = new byte[salt.Length + nonSecretPayload.Length];
-            Array.Copy(nonSecretPayload, payload, nonSecretPayload.Length);
-            Array.Copy(salt, 0, payload, nonSecretPayload.Length, salt.Length);
+        //    //Create Full Non Secret Payload
+        //    var payload = new byte[salt.Length + nonSecretPayload.Length];
+        //    Array.Copy(nonSecretPayload, payload, nonSecretPayload.Length);
+        //    Array.Copy(salt, 0, payload, nonSecretPayload.Length, salt.Length);
 
-            return SimpleEncrypt(secretMessage, key.GetKey(), payload);
-        }
+        //    return SimpleEncrypt(secretMessage, key.GetKey(), payload);
+        //}
 
-        public static byte[] SimpleDecryptWithPassword(byte[] encryptedMessage, string password, int nonSecretPayloadLength = 0)
-        {
-            //User Error Checks
-            if (string.IsNullOrWhiteSpace(password) || password.Length < MinPasswordLength)
-                throw new ArgumentException(String.Format("Must have a password of at least {0} characters!", MinPasswordLength), "password");
+        // TODO: update this to match other methods if needed
+        //public static byte[] SimpleDecryptWithPassword(byte[] encryptedMessage, string password, int nonSecretPayloadLength = 0)
+        //{
+        //    //User Error Checks
+        //    if (string.IsNullOrWhiteSpace(password) || password.Length < MinPasswordLength)
+        //        throw new ArgumentException(String.Format("Must have a password of at least {0} characters!", MinPasswordLength), "password");
 
-            if (encryptedMessage == null || encryptedMessage.Length == 0)
-                throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
+        //    if (encryptedMessage == null || encryptedMessage.Length == 0)
+        //        throw new ArgumentException("Encrypted Message Required!", "encryptedMessage");
 
-            var generator = new Pkcs5S2ParametersGenerator();
+        //    var generator = new Pkcs5S2ParametersGenerator();
 
-            //Grab Salt from Payload
-            var salt = new byte[SaltBitSize / 8];
-            Array.Copy(encryptedMessage, nonSecretPayloadLength, salt, 0, salt.Length);
+        //    //Grab Salt from Payload
+        //    var salt = new byte[SaltBitSize / 8];
+        //    Array.Copy(encryptedMessage, nonSecretPayloadLength, salt, 0, salt.Length);
 
-            generator.Init(
-              PbeParametersGenerator.Pkcs5PasswordToBytes(password.ToCharArray()),
-              salt,
-              Iterations);
+        //    generator.Init(
+        //      PbeParametersGenerator.Pkcs5PasswordToBytes(password.ToCharArray()),
+        //      salt,
+        //      Iterations);
 
-            //Generate Key
-            var key = (KeyParameter)generator.GenerateDerivedMacParameters(KeyBitSize);
+        //    //Generate Key
+        //    var key = (KeyParameter)generator.GenerateDerivedMacParameters(KeyBitSize);
 
-            return SimpleDecrypt(encryptedMessage, key.GetKey(), salt.Length + nonSecretPayloadLength);
-        }
+        //    return SimpleDecrypt(encryptedMessage, key.GetKey(), salt.Length + nonSecretPayloadLength);
+        //}
     }
 }
